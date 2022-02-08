@@ -1,0 +1,276 @@
+# Similarity of competing risks models with constant intensities and exponential right censoring # 
+# Simulation Study based on application example (here for Scenario 1 with right censoring)
+# Scenarios 2, 3, and 4 can easily be reproduced by adapting this code
+# Author: Kathrin Moellenhoff
+
+library(alabama)
+library(dplyr)
+
+#########################
+# function for data generation 
+
+sim.csh.const <- function(n.indiv,
+                          cr.haz = c(),
+                          beta = c(),
+                          cova.prob,
+                          cens = list(model="unif", param=NULL)
+)
+{
+  # simulate binary covariate with values 0/1
+  cova <- rbinom(n.indiv, size=1, prob = cova.prob) #(we don't need this step without covariates)
+  
+  # Step 1: Specify the cause-specific hazards (CSHs) a01(t)+a02(t), possibly depending on covariate values
+  csh = matrix(NA, nrow=n.indiv, ncol = length(cr.haz))
+  for(i in 1:length(cr.haz)){
+    csh[,i] = cr.haz[i]*exp(beta[i]*cova)
+  }
+  
+  # Step 2: simulate survival times with all-cause hazard a01(t)+a02(t)=rowSums(csh)
+  event.times <- rep(NA, n.indiv)
+  for(i in 1:n.indiv){
+    event.times[i] <- rexp(1, rowSums(csh)[i])
+  }
+  
+  # Step 3: For a simulated survival time T run a binomial experiment, which decides with probability a01(T)/(a01(T)+a02(T)) on cause 1
+  f.cause = matrix(NA, nrow=length(cr.haz), ncol = n.indiv)
+  for(i in 1:n.indiv){
+    f.cause[,i] <- rmultinom(1,size=1,prob = csh[i,] / rowSums(csh)[i])
+  }
+  f.cause = as.numeric(1:length(cr.haz) %*% f.cause)
+  
+  # Step 4: Additionally generate censoring times C
+  # uniform censoring = "unif"; exponential censoring = "exp", administrative censoring = "adm", no censoring = NULL
+  cens.times <- c()
+  if(is.null(cens)){cens.times <- event.times} else if(cens[[1]]=="unif"){
+    for(i in 1:n.indiv){cens.times[i] <- runif(1,0,cens[[2]])}
+  } else if(cens[[1]]=="exp"){
+    for(i in 1:n.indiv){cens.times[i] <- rexp(1,cens[[2]])}}  
+  else if(cens[[1]]=="adm"){
+    for(i in 1:n.indiv){cens.times[i] <- 90}
+  }
+  
+  obs.times <- pmin(event.times, cens.times)
+  obs.cause <- c(event.times <= cens.times)*f.cause
+  
+  # final competing risks data set:
+  crd <- data.frame(id = 1:n.indiv,
+                    obs.time = obs.times,
+                    obs.event = obs.cause,
+                    cov = cova
+                    #event.times=event.times
+                    #event = f.cause,
+                    #cens.times=cens.times
+  )
+  return(crd)
+}  
+
+# (negative) log-likelihood (for 3 states and the censoring rate)
+
+loglikelihood <- function(data){
+  state1 <- filter(data, obs.event==1)
+  state2 <- filter(data, obs.event==2)
+  state3 <- filter(data, obs.event==3)
+  cens <- filter(data, obs.event==0)
+  f <- function(theta){
+    theta1 <- theta[1]
+    theta2 <- theta[2]
+    theta3 <- theta[3]
+    theta4 <- theta[4]
+    -(dim(state1)[1]*log(theta1)-theta1*sum(data$obs.time)+dim(state2)[1]*log(theta2)-theta2*sum(data$obs.time)+dim(state3)[1]*log(theta3)-theta3*sum(data$obs.time)+dim(cens)[1]*log(theta4)-theta4*sum(data$obs.time))
+  }
+  return(f)
+}
+
+# joint likelihood for both groups (ell=1,2) for the constrained optimization
+
+joint_loglikelihood <- function(theta){
+  theta1 <- theta[1:4]
+  theta2 <- theta[5:8]
+  loglikelihood(dat1)(theta1)+loglikelihood(dat2)(theta2)
+}
+
+# here are the three constraints for each individual test (one for each state!)
+
+const1 <- function(theta){
+  theta1 <- theta[1:4]
+  theta2 <- theta[5:8]
+  abs(theta1[1]-theta2[1])-delta1
+}
+
+const2 <- function(theta){
+  theta1 <- theta[1:4]
+  theta2 <- theta[5:8]
+  abs(theta1[2]-theta2[2])-delta2
+}
+
+const3 <- function(theta){
+  theta1 <- theta[1:4]
+  theta2 <- theta[5:8]
+  abs(theta1[3]-theta2[3])-delta3
+}
+
+######
+# simulate data for two groups (based on the transition intensities of the application example and pre-specified censoring rates)
+# specifiy n1 and n2 in advance
+# specify thresholds for the test on similarity
+# fix the level alpha (here 0.05)
+# fix the number of bootstrap repetitions (here B=500)
+#####
+
+alpha1t <- c(0.0010,0.0011,0.0004) #these are the estimates from the application example
+alpha2t <- c(0.0008,0.0017,0.0009)
+
+t1 <- abs(alpha1t[1]-alpha2t[1]) #the absolute differences
+t2 <- abs(alpha1t[2]-alpha2t[2])
+t3 <- abs(alpha1t[3]-alpha2t[3])
+
+n1 <- 300 #sample sizes
+n2 <- 300
+
+delta1 <- 0.0002 #thresholds (here for type I error)
+delta2 <- 0.0006
+delta3 <- 0.0005
+
+censoring_rate <- 0.02 
+
+alpha <- 0.05 #significance level
+B <- 500 #bootstrap repetitions
+
+result <- matrix(NA,nrow=1000,ncol=4) #matrix and vectors for saving results
+rej1 <- vector()
+rej2 <- vector()
+rej3 <- vector()
+
+boot1 <- vector()
+boot2 <- vector()
+boot3 <- vector()
+
+start <- rep(0.001,4) # a start vector for the optimization
+
+Nsim <- 1000 #number of simulations
+
+#### we are now ready to simulate
+
+set.seed(1234)
+
+for(j in 1:Nsim){
+  
+  # two datasets are generated
+  dat1 <- sim.csh.const(n.indiv=n1, cr.haz = alpha1t, beta = c(0,0,0), cova.prob=0.5, cens=list("exp",censoring_rate))
+  dat2 <- sim.csh.const(n.indiv=n2, cr.haz = alpha2t, beta = c(0,0,0), cova.prob=0.5, cens=list("exp",censoring_rate))
+  
+  #we estimate the transition intensities and the rates of censoring
+  alpha1 <- optim(par=start,fn=loglikelihood(dat1))$par
+  alpha2 <- optim(par=start,fn=loglikelihood(dat2))$par
+  
+  # calculating the test statistics
+  t.stat1 <- abs(alpha1[1]-alpha2[1])
+  t.stat2 <- abs(alpha1[2]-alpha2[2])
+  t.stat3 <- abs(alpha1[3]-alpha2[3])
+  
+  # the censoring rates
+  censoring_rate_est1 <- alpha1[4]
+  censoring_rate_est2 <- alpha2[4]
+  
+  
+  ### 3 individual tests (per state) ###
+  
+  ### State 1 ###
+  
+  #constrained optimization
+
+  if (t.stat1>=delta1){
+    min_cons <- c(alpha1,alpha2)}else{
+      min_cons <- auglag(par=c(alpha1,alpha2),fn=joint_loglikelihood,heq=const1,control.outer=list(trace=FALSE))$par
+    }
+
+  alpha1_cons <- min_cons[1:3]
+  alpha2_cons <- min_cons[5:7]
+
+  # bootstrap (create new datasets with the estimated parameters and estimate the transition intensities)
+  for(k in 1:B){
+    dat1b <- sim.csh.const(n.indiv=n1, cr.haz = alpha1_cons, beta = c(0,0,0), cova.prob=0.5, cens=list("exp",censoring_rate_est1))
+    dat2b <- sim.csh.const(n.indiv=n2, cr.haz = alpha2_cons, beta = c(0,0,0), cova.prob=0.5, cens=list("exp",censoring_rate_est2))
+
+    alpha1b <- optim(par=c(alpha1_cons,censoring_rate_est1),fn=loglikelihood(dat1b))$par
+    alpha2b <- optim(par=c(alpha1_cons,censoring_rate_est2),fn=loglikelihood(dat2b))$par
+
+    tb <- abs(alpha1b[1]-alpha2b[1])
+    boot1[k] <- tb
+  }
+
+  # decision rule
+  crit_val <- quantile(boot1,alpha)
+  #pval <- ecdf(boot)(t.stat1)
+  
+  if(t.stat1<crit_val){
+    rej1[j]=1
+  }else{rej1[j]=0}
+  
+  print(sum(rej1)/j)
+  
+  ### State 2 ###
+  
+  if (t.stat2>=delta2){
+    min_cons <- c(alpha1,alpha2)}else{
+    min_cons <- auglag(par=c(alpha1,alpha2),fn=joint_loglikelihood,heq=const2,control.outer=list(trace=FALSE))$par
+    }
+  
+  alpha1_cons <- min_cons[1:3]
+  alpha2_cons <- min_cons[5:7]
+  
+  # bootstrap (create new datasets with the estimated parameters)
+  for(k in 1:B){
+    dat1b <- sim.csh.const(n.indiv=n1, cr.haz = alpha1_cons, beta = c(0,0,0), cova.prob=0.5, cens=list("exp",censoring_rate_est1))
+    dat2b <- sim.csh.const(n.indiv=n2, cr.haz = alpha2_cons, beta = c(0,0,0), cova.prob=0.5, cens=list("exp",censoring_rate_est2))
+    
+    alpha1b <- optim(par=c(alpha1_cons,censoring_rate_est1),fn=loglikelihood(dat1b))$par
+    alpha2b <- optim(par=c(alpha1_cons,censoring_rate_est2),fn=loglikelihood(dat2b))$par
+    
+    tb <- abs(alpha1b[2]-alpha2b[2])
+    boot2[k] <- tb
+  }
+  
+  # decision rule
+  crit_val2 <- quantile(boot2,alpha)
+  #pval <- ecdf(boot)(t.stat1)
+  if(t.stat2<crit_val2){
+    rej2[j]=1
+  }else{rej2[j]=0}
+  
+  print(sum(rej2)/j) 
+  
+  ### State 3 ###
+  
+  if (t.stat3>=delta3){
+    min_cons <- c(alpha1,alpha2)}else{
+    min_cons <- auglag(par=c(alpha1,alpha2),fn=joint_loglikelihood,heq=const3,control.outer=list(trace=FALSE))$par
+    }
+  alpha1_cons <- min_cons[1:3]
+  alpha2_cons <- min_cons[5:7]
+  
+  # bootstrap (create new datasets with the estimated parameters)
+  for(k in 1:B){
+    dat1b <- sim.csh.const(n.indiv=n1, cr.haz = alpha1_cons, beta = c(0,0,0), cova.prob=0.5, cens=list("exp",censoring_rate_est1))
+    dat2b <- sim.csh.const(n.indiv=n2, cr.haz = alpha2_cons, beta = c(0,0,0), cova.prob=0.5, cens=list("exp",censoring_rate_est2))
+    
+    alpha1b <- optim(par=c(alpha1_cons,censoring_rate_est1),fn=loglikelihood(dat1b))$par
+    alpha2b <- optim(par=c(alpha1_cons,censoring_rate_est2),fn=loglikelihood(dat2b))$par
+    
+    tb <- abs(alpha1b[3]-alpha2b[3])
+    boot3[k] <- tb
+  }
+  
+  # decision rule
+  crit_val3 <- quantile(boot3,alpha)
+  #pval <- ecdf(boot)(t.stat1)
+  if(t.stat3<crit_val3){
+    rej3[j]=1
+  }else{rej3[j]=0}
+  
+  print(sum(rej3)/j) 
+  print(j)
+}
+
+# calculate the proportion of rejections for the global test
+sum(rej1==1 & rej2==1 & rej3==1)/Nsim
