@@ -131,7 +131,7 @@ delta1 <- 0.0002 #thresholds (here for type I error)
 delta2 <- 0.0006
 delta3 <- 0.0005
 
-censoring_rate <- 0.02 
+censoring_rate <- 0.01 
 
 alpha <- 0.05 #significance level
 B <- 500 #bootstrap repetitions
