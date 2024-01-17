@@ -1,3 +1,5 @@
+# Similarity of competing risks models with constant intensities # 
+# https://doi.org/10.1002/sim.9481
 # Similarity of competing risks models with constant intensities and exponential right censoring # 
 # Simulation Study based on application example (here for Scenario 1 with right censoring)
 # Scenarios 2, 3, and 4 can easily be reproduced by adapting this code
