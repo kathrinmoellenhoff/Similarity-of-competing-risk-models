@@ -1,7 +1,7 @@
 # Testing similarity of parametric competing risks models for identifying potentially similar pathways in healthcare #
 # https://doi.org/10.48550/arXiv.2401.04490
 # Transition intensities based on the Gompertz distribution (state 1 and 2) and the Weibull distribution (state 3)
-# Administrative censoring
+# Administrative censoring (here after 90 days)
 # Simulation Study based on application example (Scenario 3 and Scenario 4 in the paper)
 # Code uses a parallelization as the simulation is quite computational intensive
 # Author: Kathrin Moellenhoff
@@ -18,6 +18,7 @@ library(doParallel)
 # specify thresholds for the test on similarity
 # fix the level alpha (here 0.05)
 # fix the number of bootstrap repetitions (here B=250)
+# specify the end of study (here 90 days)
 #####
 
 n1 <- 300 #sample sizes
