@@ -211,7 +211,7 @@ boot <- vector()
 
 #set.seed(12345)
 
-n.cores <- min(30, parallel::detectCores() - 1)
+n.cores <- parallel::detectCores() - 1
 my.cluster <- parallel::makeCluster(n.cores, outfile="")
 
 doParallel::registerDoParallel(cl = my.cluster)
