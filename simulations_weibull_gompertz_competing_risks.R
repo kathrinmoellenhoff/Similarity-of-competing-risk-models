@@ -200,7 +200,7 @@ boot <- vector()
 
 #### we are now ready to simulate
 
-n.cores <- min(35, parallel::detectCores() - 1)
+n.cores <- parallel::detectCores() - 1
 my.cluster <- parallel::makeCluster(n.cores, outfile="")
 
 doParallel::registerDoParallel(cl = my.cluster)
